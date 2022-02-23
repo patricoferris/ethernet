@@ -45,13 +45,12 @@ module type S = sig
 
   val disconnect : t -> unit
 
-  val write :
+  val writev :
     t ->
     ?src:Macaddr.t ->
     Macaddr.t ->
     Packet.proto ->
-    ?size:int ->
-    (Cstruct.t -> int) ->
+    Cstruct.t list ->
     unit Error.r
 
   val mac : t -> Macaddr.t
@@ -71,7 +70,7 @@ let src = Logs.Src.create "ethernet" ~doc:"Mirage Ethernet"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 module Make (Netif : Mirage_net.S) = struct
-  type t = { netif : Netif.t }
+  type t = { netif : Netif.t; }
 
   let mac t = Netif.mac t.netif
   let mtu t = Netif.mtu t.netif (* interface MTU excludes Ethernet header *)
@@ -91,38 +90,33 @@ module Make (Netif : Mirage_net.S) = struct
     | Ok _ -> ()
     | Error s -> Log.debug (fun f -> f "dropping Ethernet frame: %s" s)
 
-  let write t ?src destination ethertype ?size payload =
+  let writev t ?src destination ethertype payload =
     MProf.Trace.label "ethernet.write";
     let source = match src with None -> mac t | Some x -> x
     and eth_hdr_size = Ethernet_wire.sizeof_ethernet
     and mtu = mtu t in
     let open Error.Syntax in
-    let* size =
-      match size with
-      | Some s when s > mtu -> Error.v ~__POS__ Exceeds_mtu
-      | Some s -> Ok s
-      | None -> Ok mtu
+    let* () =
+      match (Cstruct.lenv payload) with
+      | s when s > mtu -> Error.v ~__POS__ Exceeds_mtu
+      | _ -> Ok ()
     in
-    let size = eth_hdr_size + size in
     let hdr = { Ethernet_packet.source; destination; ethertype } in
-    let fill frame =
-      match Ethernet_packet.Marshal.into_cstruct hdr frame with
-      | Error msg ->
-          Log.err (fun m ->
-              m
-                "error %s while marshalling ethernet header into allocated \
-                 buffer"
-                msg);
-          0
-      | Ok () ->
-          let len = payload (Cstruct.shift frame eth_hdr_size) in
-          eth_hdr_size + len
-    in
-    Netif.write t.netif ~size fill
-    |> Error.map_error (fun e ->
-           Log.warn (fun f ->
-               f "netif write errored %a" Error.pp (Error.head e));
-           e)
+    let header_buffer = Cstruct.create_unsafe eth_hdr_size in 
+    match Ethernet_packet.Marshal.into_cstruct hdr header_buffer with
+    | Error msg ->
+        Log.err (fun m ->
+            m
+              "error %s while marshalling ethernet header into allocated \
+                buffer"
+              msg);
+        failwith "todo"
+    | Ok () -> 
+      Netif.writev t.netif (header_buffer::payload)
+      |> Error.map_error (fun e ->
+        Log.warn (fun f ->
+            f "netif write errored %a" Error.pp (Error.head e));
+        e)
 
   let connect netif =
     MProf.Trace.label "ethernet.connect";

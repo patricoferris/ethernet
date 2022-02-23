@@ -64,13 +64,12 @@ module type S = sig
   (** Disconnect from the ethernet layer. While this might take some time to
       complete, it can never result in an error. *)
 
-  val write :
+  val writev :
     t ->
     ?src:Macaddr.t ->
     Macaddr.t ->
     Packet.proto ->
-    ?size:int ->
-    (Cstruct.t -> int) ->
+    Cstruct.t list ->
     unit Error.r
   (** [write eth ~src dst proto ~size payload] outputs an ethernet frame which
      header is filled by [eth], and its payload is the buffer from the call to

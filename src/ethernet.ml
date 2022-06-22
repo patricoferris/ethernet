@@ -33,12 +33,7 @@ module Packet = struct
   let make_cstruct = Ethernet_packet.Marshal.make_cstruct
 end
 
-type Error.t += Exceeds_mtu
-
-let () =
-  Error.register_printer ~id:"ethernet" ~title:"Ethernet" ~pp:(function
-    | Exceeds_mtu -> Some Fmt.(any "MTU exceeded")
-    | _ -> None)
+exception Exceeds_mtu
 
 module type S = sig
   type t
@@ -51,7 +46,7 @@ module type S = sig
     Macaddr.t ->
     Packet.proto ->
     Cstruct.t list ->
-    unit Error.r
+    unit
 
   val mac : t -> Macaddr.t
   val mtu : t -> int
@@ -95,12 +90,8 @@ module Make (Netif : Mirage_net.S) = struct
     let source = match src with None -> mac t | Some x -> x
     and eth_hdr_size = Ethernet_wire.sizeof_ethernet
     and mtu = mtu t in
-    let open Error.Syntax in
-    let* () =
-      match (Cstruct.lenv payload) with
-      | s when s > mtu -> Error.v ~__POS__ Exceeds_mtu
-      | _ -> Ok ()
-    in
+    if Cstruct.lenv payload > mtu then
+      raise Exceeds_mtu;
     let hdr = { Ethernet_packet.source; destination; ethertype } in
     let header_buffer = Cstruct.create_unsafe eth_hdr_size in 
     match Ethernet_packet.Marshal.into_cstruct hdr header_buffer with
@@ -111,12 +102,7 @@ module Make (Netif : Mirage_net.S) = struct
                 buffer"
               msg);
         failwith "todo"
-    | Ok () -> 
-      Netif.writev t.netif (header_buffer::payload)
-      |> Error.map_error (fun e ->
-        Log.warn (fun f ->
-            f "netif write errored %a" Error.pp (Error.head e));
-        e)
+    | Ok () -> Netif.writev t.netif (header_buffer::payload)
 
   let connect netif =
     MProf.Trace.label "ethernet.connect";

@@ -54,7 +54,7 @@ module Packet : sig
       buffer. *)
 end
 
-type Error.t += Exceeds_mtu  (** The type for ethernet interface errors. *)
+exception Exceeds_mtu  (** The type for ethernet interface errors. *)
 
 module type S = sig
   type t
@@ -70,7 +70,7 @@ module type S = sig
     Macaddr.t ->
     Packet.proto ->
     Cstruct.t list ->
-    unit Error.r
+    unit
   (** [write eth ~src dst proto ~size payload] outputs an ethernet frame which
      header is filled by [eth], and its payload is the buffer from the call to
      [payload]. [Payload] gets a buffer of [size] (defaults to mtu) to fill with

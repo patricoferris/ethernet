@@ -90,19 +90,31 @@ module Make (Netif : Mirage_net.S) = struct
     let source = match src with None -> mac t | Some x -> x
     and eth_hdr_size = Ethernet_wire.sizeof_ethernet
     and mtu = mtu t in
-    if Cstruct.lenv payload > mtu then
+    let payload_length = Cstruct.lenv payload in
+    if payload_length > mtu then
       raise Exceeds_mtu;
     let hdr = { Ethernet_packet.source; destination; ethertype } in
-    let header_buffer = Cstruct.create_unsafe eth_hdr_size in 
-    match Ethernet_packet.Marshal.into_cstruct hdr header_buffer with
-    | Error msg ->
-        Log.err (fun m ->
-            m
-              "error %s while marshalling ethernet header into allocated \
-                buffer"
-              msg);
-        failwith "todo"
-    | Ok () -> Netif.writev t.netif (header_buffer::payload)
+    let _i =
+      Netif.write t.netif ~size:(eth_hdr_size + Cstruct.lenv payload) (fun buf ->
+      match Ethernet_packet.Marshal.into_cstruct hdr buf with
+      | Error msg ->
+          Log.err (fun m ->
+              m
+                "error %s while marshalling ethernet header into allocated \
+                  buffer"
+                msg);
+          failwith "todo"
+      | Ok () -> 
+        let rec loop off = function
+          | [] -> eth_hdr_size + off
+          | p :: ps ->
+            let l = Cstruct.length p in
+            Cstruct.blit p 0 buf off l;
+            loop (off + l) ps
+          in 
+        loop eth_hdr_size payload)
+    in
+      ()
 
   let connect netif =
     MProf.Trace.label "ethernet.connect";
